@@ -1,4 +1,4 @@
-name: Builds JAR and runs test with docker-compose
+name: Build and run E2E tests
 
 on:
   push:
