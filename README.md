@@ -1,4 +1,4 @@
-[![Java CI with Maven](https://github.com/italia/keycloak-spid-provider/actions/workflows/maven.yml/badge.svg)](https://github.com/italia/keycloak-spid-provider/actions/workflows/maven.yml)
+[![Java CI with Maven](https://github.com/italia/keycloak-spid-provider/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/italia/keycloak-spid-provider/actions/workflows/build-and-test.yml)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/italia/keycloak-spid-provider?sort=semver)](https://img.shields.io/github/v/release/italia/keycloak-spid-provider?sort=semver) 
 [![GitHub All Releases](https://img.shields.io/github/downloads/italia/keycloak-spid-provider/total)](https://img.shields.io/github/downloads/italia/keycloak-spid-provider/total)
 [![GitHub issues](https://img.shields.io/github/issues/italia/keycloak-spid-provider)](https://github.com/italia/keycloak-spid-provider/issues)
