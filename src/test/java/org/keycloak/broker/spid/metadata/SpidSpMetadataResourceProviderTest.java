@@ -13,6 +13,9 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Modified by Link.it S.r.l., 2026: added tests for the additional
+ * AttributeConsumingService blocks feature.
  */
 
 package org.keycloak.broker.spid.metadata;
