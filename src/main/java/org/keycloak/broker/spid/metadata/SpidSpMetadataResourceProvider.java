@@ -10,6 +10,9 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Modified by Link.it S.r.l., 2026: added support for publishing additional
+ * AttributeConsumingService blocks (see SpidIdentityProviderConfig.ADDITIONAL_ATTRIBUTE_CONSUMING_SERVICES).
  */
 
 package org.keycloak.broker.spid.metadata;
@@ -34,6 +37,7 @@ import org.keycloak.dom.saml.v2.metadata.IndexedEndpointType;
 import org.keycloak.dom.saml.v2.metadata.KeyDescriptorType;
 import org.keycloak.dom.saml.v2.metadata.KeyTypes;
 import org.keycloak.dom.saml.v2.metadata.LocalizedNameType;
+import org.keycloak.dom.saml.v2.metadata.RequestedAttributeType;
 import org.keycloak.dom.saml.v2.metadata.SPSSODescriptorType;
 import org.keycloak.models.KeyManager;
 import org.keycloak.models.KeyManager.ActiveRsaKey;
@@ -211,6 +215,12 @@ public class SpidSpMetadataResourceProvider implements RealmResourceProvider {
             }
             
             // Add the attribute mappers
+            // NOTE: SamlMetadataDescriptorUpdater implementations (e.g. the built-in
+            // UserAttributeMapper) add their RequestedAttribute to EVERY
+            // AttributeConsumingService currently present in the descriptor, not just the
+            // default one. This loop must therefore run BEFORE any additional
+            // AttributeConsumingService is added below, otherwise mapper-driven attributes
+            // would leak into (and pollute) the additional, independently-configured blocks.
             identityProviderStorage.getMappersByAliasStream(config.getAlias())
                 .forEach(mapper -> {
                     IdentityProviderMapper target = (IdentityProviderMapper) session.getKeycloakSessionFactory().getProviderFactory(IdentityProviderMapper.class, mapper.getIdentityProviderMapper());
@@ -220,7 +230,11 @@ public class SpidSpMetadataResourceProvider implements RealmResourceProvider {
                         metadataAttrProvider.updateMetadata(mapper, entityDescriptor);
                     }
                 });
-				
+
+            // Add any additional AttributeConsumingService blocks (extra SPID/eIDAS datasets),
+            // each built directly from config so it only carries the attributes it declares -
+            // see SpidIdentityProviderConfig.ADDITIONAL_ATTRIBUTE_CONSUMING_SERVICES.
+            addAdditionalAttributeConsumingServices(entityDescriptor, config.getAdditionalAttributeConsumingServices());
 
 			// Additional EntityDescriptor customizations
             customizeEntityDescriptor(entityDescriptor, config, realm);
@@ -305,6 +319,94 @@ public class SpidSpMetadataResourceProvider implements RealmResourceProvider {
         SAMLMetadataWriter metadataWriter = new SAMLMetadataWriter(writer);
         metadataWriter.writeEntityDescriptor(entityDescriptor);
         return sw.toString();
+    }
+
+    /**
+     * Parses {@link SpidIdentityProviderConfig#ADDITIONAL_ATTRIBUTE_CONSUMING_SERVICES} and adds
+     * one {@code AttributeConsumingService} per line to the SP descriptor(s) of the given entity
+     * descriptor. Format per line: {@code index|serviceName|attr1:friendlyName1,attr2,...}.
+     * Malformed lines are logged and skipped rather than failing the whole metadata document.
+     */
+    private void addAdditionalAttributeConsumingServices(EntityDescriptorType entityDescriptor, String config) {
+        if (config == null || config.isBlank()) {
+            return;
+        }
+
+        for (String line : config.split("\\r?\\n")) {
+            line = line.strip();
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+
+            String[] fields = line.split("\\|", 3);
+            if (fields.length != 3) {
+                logger.warnf("Skipping malformed additionalAttributeConsumingServices line (expected " +
+                        "'index|serviceName|attr1:friendlyName1,attr2,...'): %s", line);
+                continue;
+            }
+
+            int index;
+            try {
+                index = Integer.parseInt(fields[0].strip());
+            } catch (NumberFormatException e) {
+                logger.warnf("Skipping additionalAttributeConsumingServices line with non-numeric index: %s", line);
+                continue;
+            }
+
+            String serviceName = fields[1].strip();
+            String[] attributeDefinitions = fields[2].split(",");
+
+            AttributeConsumingServiceType attributeConsumingService = new AttributeConsumingServiceType(index);
+            attributeConsumingService.setIsDefault(false);
+
+            if (!serviceName.isEmpty()) {
+                LocalizedNameType serviceNameElement = new LocalizedNameType("it");
+                serviceNameElement.setValue(serviceName);
+                attributeConsumingService.addServiceName(serviceNameElement);
+            }
+
+            boolean hasAtLeastOneAttribute = false;
+            for (String attributeDefinition : attributeDefinitions) {
+                attributeDefinition = attributeDefinition.strip();
+                if (attributeDefinition.isEmpty()) {
+                    continue;
+                }
+
+                String[] parsedAttribute = attributeDefinition.split(":", 2);
+                String attributeName = parsedAttribute[0].strip();
+                String attributeFriendlyName = parsedAttribute.length >= 2 ? parsedAttribute[1].strip() : null;
+
+                if (attributeName.isEmpty()) {
+                    continue;
+                }
+
+                RequestedAttributeType requestedAttribute = new RequestedAttributeType(attributeName);
+                requestedAttribute.setIsRequired(null);
+                requestedAttribute.setNameFormat(JBossSAMLURIConstants.ATTRIBUTE_FORMAT_BASIC.get());
+                if (attributeFriendlyName != null && !attributeFriendlyName.isEmpty()) {
+                    requestedAttribute.setFriendlyName(attributeFriendlyName);
+                }
+                attributeConsumingService.addRequestedAttribute(requestedAttribute);
+                hasAtLeastOneAttribute = true;
+            }
+
+            if (!hasAtLeastOneAttribute) {
+                logger.warnf("Skipping additionalAttributeConsumingServices index %d: no valid attributes declared", index);
+                continue;
+            }
+
+            for (EntityDescriptorType.EDTChoiceType choiceType : entityDescriptor.getChoiceType()) {
+                List<EntityDescriptorType.EDTDescriptorChoiceType> descriptors = choiceType.getDescriptors();
+                if (descriptors == null) {
+                    continue;
+                }
+                for (EntityDescriptorType.EDTDescriptorChoiceType descriptor : descriptors) {
+                    if (descriptor.getSpDescriptor() != null) {
+                        descriptor.getSpDescriptor().addAttributeConsumerService(attributeConsumingService);
+                    }
+                }
+            }
+        }
     }
 
     private String getEntityId(String configEntityId, UriInfo uriInfo, RealmModel realm) {

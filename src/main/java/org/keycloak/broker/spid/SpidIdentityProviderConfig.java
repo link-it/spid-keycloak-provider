@@ -13,6 +13,9 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Modified by Link.it S.r.l., 2026: added the additionalAttributeConsumingServices
+ * config field to publish multiple AttributeConsumingService blocks in the SP metadata.
  */
 package org.keycloak.broker.spid;
 
@@ -49,6 +52,30 @@ public class SpidIdentityProviderConfig extends SAMLIdentityProviderConfig  {
     public static final String BILLING_CONTACT_SITE_COUNTRY = "billingContactSiteCountry";
     public static final String SPID_RESPONSE_DEBUG_ENABLED = "debugEnabled";
     public static final String METADATA_URL = "metadataUrl";
+
+    /**
+     * Extra {@code AttributeConsumingService} blocks to publish in the SP metadata, in addition
+     * to the default one built from {@link #getAttributeConsumingServiceIndex()} /
+     * {@link org.keycloak.broker.saml.SAMLIdentityProviderConfig#getAttributeConsumingServiceName()}
+     * and the realm's SPID attribute mappers.
+     * <p>
+     * One real SPID/CIE provider is often shared by clients that need different attribute
+     * datasets (e.g. SPID "minimo"/"esteso"/"completo" and the eIDAS profiles) under the same
+     * entity/aggregated identity. SPID IdPs resolve the {@code AttributeConsumingServiceIndex}
+     * requested in each AuthnRequest against the SP's <em>published</em> metadata, so every index
+     * a client may request (see {@code SpidSamlAuthenticationPreprocessor}) must be declared here
+     * - a single default block is not enough.
+     * <p>
+     * Format: one service per line, {@code index|serviceName|attr1:friendlyName1,attr2:friendlyName2,...}
+     * The friendly name after {@code :} is optional. Example:
+     * <pre>
+     * 1|Servizi online (esteso)|spidCode,name,familyName,placeOfBirth,countyOfBirth,dateOfBirth,gender,fiscalNumber,idCard,mobilePhone,email,address,expirationDate,digitalAddress
+     * 2|Servizi online (completo)|spidCode,name,familyName,placeOfBirth,countyOfBirth,dateOfBirth,gender,companyName,registeredOffice,fiscalNumber,ivaCode,idCard,mobilePhone,email,address,expirationDate,digitalAddress
+     * </pre>
+     * Unlike the default block, these are built directly from this configuration, not from the
+     * realm's IdP attribute mappers - so each index can declare its own, distinct attribute list.
+     */
+    public static final String ADDITIONAL_ATTRIBUTE_CONSUMING_SERVICES = "additionalAttributeConsumingServices";
 
     public SpidIdentityProviderConfig(){
     }
@@ -233,6 +260,14 @@ public class SpidIdentityProviderConfig extends SAMLIdentityProviderConfig  {
         getConfig().put(SPID_RESPONSE_DEBUG_ENABLED, String.valueOf(isDebugEnabled));
     }
 
+    public String getAdditionalAttributeConsumingServices() {
+        return getConfig().get(ADDITIONAL_ATTRIBUTE_CONSUMING_SERVICES);
+    }
+
+    public void setAdditionalAttributeConsumingServices(String additionalAttributeConsumingServices) {
+        getConfig().put(ADDITIONAL_ATTRIBUTE_CONSUMING_SERVICES, additionalAttributeConsumingServices);
+    }
+
     public static List<ProviderConfigProperty> getConfigProperties() {
         return ProviderConfigurationBuilder.create()
 
@@ -396,6 +431,13 @@ public class SpidIdentityProviderConfig extends SAMLIdentityProviderConfig  {
         .type(ProviderConfigProperty.BOOLEAN_TYPE)
         .label("identity-provider.spid.debug-enabled")
         .helpText("identity-provider.spid.debug-enabled.tooltip")
+        .add()
+
+        .property()
+        .name(ADDITIONAL_ATTRIBUTE_CONSUMING_SERVICES)
+        .type(ProviderConfigProperty.TEXT_TYPE)
+        .label("identity-provider.spid.additional-attribute-consuming-services")
+        .helpText("identity-provider.spid.additional-attribute-consuming-services.tooltip")
         .add()
 
         .build();

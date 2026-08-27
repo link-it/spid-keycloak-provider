@@ -13,6 +13,9 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Modified by Link.it S.r.l., 2026: added tests for the additional
+ * AttributeConsumingService blocks feature.
  */
 
 package org.keycloak.broker.spid.metadata;
@@ -177,6 +180,32 @@ public class SpidSpMetadataResourceProviderTest {
         Response response = invitationResourceProvider.get();
         assertEquals(200, response.getStatus());
         assertMetaData(response.getEntity().toString(), "/metadata/expected_metadata_private_SP.xml");
+    }
+
+    @Test
+    void get_withAdditionalAttributeConsumingService_shouldReturnBothDatasets() {
+        Map<String, String> providerConfig = mockPublicSPConfig();
+        providerConfig.put(SpidIdentityProviderConfig.ADDITIONAL_ATTRIBUTE_CONSUMING_SERVICES,
+                "2|Servizi online (esteso)|email:Email,mobilePhone");
+        mockSPIDProviders(providerConfig, "idp1", "idp2");
+
+        Response response = invitationResourceProvider.get();
+        assertEquals(200, response.getStatus());
+        assertMetaData(response.getEntity().toString(), "/metadata/expected_metadata_public_SP_with_additional_dataset.xml");
+    }
+
+    @Test
+    void get_withMalformedAdditionalAttributeConsumingService_shouldSkipItAndKeepDefaultDataset() {
+        Map<String, String> providerConfig = mockPublicSPConfig();
+        // missing the "attributes" segment, non-numeric index, and an entry with no attributes at all:
+        // all three must be skipped without failing metadata generation
+        providerConfig.put(SpidIdentityProviderConfig.ADDITIONAL_ATTRIBUTE_CONSUMING_SERVICES,
+                "not-a-number|Broken|email\n2|No attributes|\nmalformed-line-without-separators");
+        mockSPIDProviders(providerConfig, "idp1", "idp2");
+
+        Response response = invitationResourceProvider.get();
+        assertEquals(200, response.getStatus());
+        assertMetaData(response.getEntity().toString(), "/metadata/expected_metadata_public_SP.xml");
     }
 
     private Map<String, String> mockPublicSPConfig() {
