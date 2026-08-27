@@ -179,6 +179,32 @@ public class SpidSpMetadataResourceProviderTest {
         assertMetaData(response.getEntity().toString(), "/metadata/expected_metadata_private_SP.xml");
     }
 
+    @Test
+    void get_withAdditionalAttributeConsumingService_shouldReturnBothDatasets() {
+        Map<String, String> providerConfig = mockPublicSPConfig();
+        providerConfig.put(SpidIdentityProviderConfig.ADDITIONAL_ATTRIBUTE_CONSUMING_SERVICES,
+                "2|Servizi online (esteso)|email:Email,mobilePhone");
+        mockSPIDProviders(providerConfig, "idp1", "idp2");
+
+        Response response = invitationResourceProvider.get();
+        assertEquals(200, response.getStatus());
+        assertMetaData(response.getEntity().toString(), "/metadata/expected_metadata_public_SP_with_additional_dataset.xml");
+    }
+
+    @Test
+    void get_withMalformedAdditionalAttributeConsumingService_shouldSkipItAndKeepDefaultDataset() {
+        Map<String, String> providerConfig = mockPublicSPConfig();
+        // missing the "attributes" segment, non-numeric index, and an entry with no attributes at all:
+        // all three must be skipped without failing metadata generation
+        providerConfig.put(SpidIdentityProviderConfig.ADDITIONAL_ATTRIBUTE_CONSUMING_SERVICES,
+                "not-a-number|Broken|email\n2|No attributes|\nmalformed-line-without-separators");
+        mockSPIDProviders(providerConfig, "idp1", "idp2");
+
+        Response response = invitationResourceProvider.get();
+        assertEquals(200, response.getStatus());
+        assertMetaData(response.getEntity().toString(), "/metadata/expected_metadata_public_SP.xml");
+    }
+
     private Map<String, String> mockPublicSPConfig() {
         Map<String, String> providerConfig = mockCommonConfig();
         providerConfig.put(SpidIdentityProviderConfig.OTHER_CONTACT_SP_PRIVATE, "false");
