@@ -16,7 +16,10 @@ package org.keycloak.broker.spid.metadata;
 
 import org.jboss.logging.Logger;
 
+import org.keycloak.broker.spid.SpidAggregatorConfig;
 import org.keycloak.broker.spid.SpidIdentityProviderConfig;
+import org.keycloak.broker.spid.metadata.extensions.SpidAggregatorContactType;
+import org.keycloak.broker.spid.metadata.extensions.SpidAggregatedContactType;
 import org.keycloak.broker.spid.metadata.extensions.SpidBillingContactType;
 import org.keycloak.broker.spid.metadata.extensions.SpidOrganizationType;
 import org.keycloak.broker.spid.metadata.extensions.SpidOtherContactType;
@@ -62,6 +65,8 @@ import java.util.HexFormat;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import jakarta.ws.rs.GET;
@@ -152,6 +157,7 @@ public class SpidSpMetadataResourceProvider implements RealmResourceProvider {
                     .filter(Objects::nonNull)
                     .filter(key -> key.getCertificate() != null)
                     .sorted(SamlService::compareKeys)
+                    .limit(1)
                     .forEach(key -> {
                         try {
                             X509Certificate cert = key.getCertificate();
@@ -217,7 +223,7 @@ public class SpidSpMetadataResourceProvider implements RealmResourceProvider {
 				
 
 			// Additional EntityDescriptor customizations
-            customizeEntityDescriptor(entityDescriptor, config);
+            customizeEntityDescriptor(entityDescriptor, config, realm);
 
             // Additional SPSSODescriptor customizations
             List<URI> assertionEndpoints = lstSpidIdentityProviders.stream()
@@ -253,6 +259,9 @@ public class SpidSpMetadataResourceProvider implements RealmResourceProvider {
             }
 
             String descriptor = writeEntityDescriptorWithConsistentID(entityDescriptor);
+
+            // Aggiungi attributo spid:entityType ai ContactPerson in modalità aggregatore
+            descriptor = addSpidEntityTypeAttributes(descriptor, realm);
 
             // Metadata signing
             if (config.isSignSpMetadata())
@@ -306,17 +315,68 @@ public class SpidSpMetadataResourceProvider implements RealmResourceProvider {
     }
 
     private static void customizeEntityDescriptor(EntityDescriptorType entityDescriptor,
-        SpidIdentityProviderConfig config)
+        SpidIdentityProviderConfig config, RealmModel realm)
         throws ConfigurationException
     {
         // Organization
         SpidOrganizationType.build(config).ifPresent(entityDescriptor::setOrganization);
 
-        // ContactPerson type=OTHER
-        SpidOtherContactType.build(config).ifPresent(entityDescriptor::addContactPerson);
+        // Verifica se è abilitata la modalità aggregatore (legge da properties file o realm attributes)
+        SpidAggregatorConfig aggregatorConfig = new SpidAggregatorConfig(realm);
 
-        // ContactPerson type=BILLING
+        if (aggregatorConfig.isAggregatorEnabled()) {
+            // Modalità Aggregatore: genera due ContactPerson type=OTHER
+            // 1. ContactPerson per l'aggregatore (spid:entityType="spid:aggregator")
+            SpidAggregatorContactType.build(realm).ifPresent(entityDescriptor::addContactPerson);
+            // 2. ContactPerson per l'ente aggregato — legge IPA code/company/pubblico
+            //    direttamente dalla config del primo IdP SPID (con fallback al file properties)
+            SpidAggregatedContactType.build(realm, config).ifPresent(entityDescriptor::addContactPerson);
+        } else {
+            // SP standard: genera un solo ContactPerson type=OTHER
+            SpidOtherContactType.build(config).ifPresent(entityDescriptor::addContactPerson);
+        }
+
+        // ContactPerson type=BILLING (sempre dalla config IdP)
         SpidBillingContactType.build(config).ifPresent(entityDescriptor::addContactPerson);
+    }
+
+    /**
+     * Aggiunge l'attributo spid:entityType ai ContactPerson type=other in modalità aggregatore.
+     * Il primo ContactPerson other diventa spid:aggregator, il secondo spid:aggregated.
+     */
+    private static String addSpidEntityTypeAttributes(String xml, RealmModel realm) {
+        SpidAggregatorConfig aggregatorConfig = new SpidAggregatorConfig(realm);
+
+        if (!aggregatorConfig.isAggregatorEnabled()) {
+            return xml;
+        }
+
+        // Aggiungi namespace spid e attributo entityType al primo ContactPerson type=other (aggregator)
+        Pattern firstContactPattern = Pattern.compile(
+            "(<md:ContactPerson\\s+)(contactType=\"other\">)",
+            Pattern.DOTALL
+        );
+        Matcher firstMatcher = firstContactPattern.matcher(xml);
+        if (firstMatcher.find()) {
+            xml = firstMatcher.replaceFirst(
+                "$1xmlns:spid=\"https://spid.gov.it/saml-extensions\" spid:entityType=\"spid:aggregator\" $2"
+            );
+        }
+
+        // Aggiungi namespace spid e attributo entityType al secondo ContactPerson type=other (aggregated)
+        // Cerchiamo un ContactPerson che NON abbia già spid:entityType
+        Pattern secondContactPattern = Pattern.compile(
+            "(<md:ContactPerson\\s+)(contactType=\"other\">)(?!.*spid:entityType)",
+            Pattern.DOTALL
+        );
+        Matcher secondMatcher = secondContactPattern.matcher(xml);
+        if (secondMatcher.find()) {
+            xml = secondMatcher.replaceFirst(
+                "$1xmlns:spid=\"https://spid.gov.it/saml-extensions\" spid:entityType=\"spid:aggregated\" $2"
+            );
+        }
+
+        return xml;
     }
 
     private static void customizeSpDescriptor(SPSSODescriptorType spDescriptor,
