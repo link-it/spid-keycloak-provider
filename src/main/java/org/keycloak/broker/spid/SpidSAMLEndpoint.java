@@ -30,6 +30,7 @@ import org.keycloak.dom.saml.v2.protocol.ResponseType;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
+import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeyManager;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.protocol.saml.SamlProtocol;
@@ -332,6 +333,21 @@ public class SpidSAMLEndpoint extends SAMLEndpoint {
                 cvb.addAllowedAudience(URI.create(issuerURL));
                 if (responseType.getDestination() != null) {
                     cvb.addAllowedAudience(URI.create(responseType.getDestination()));
+                }
+                // SPID: the requesting client may have overridden the Issuer sent to the
+                // IdP (see SpidSamlAuthenticationPreprocessor.CLIENT_ATTRIBUTE_SPID_ISSUER,
+                // used for aggregatori where each client presents its own registered
+                // sub-entity). The IdP echoes that same value back as Audience, so it must
+                // be accepted here too — otherwise every login using a per-client issuer
+                // override is rejected as "not addressed to this SP" even though it is
+                // exactly the identity that was requested.
+                ClientModel client = authSession.getClient();
+                if (client != null) {
+                    String issuerOverride = client.getAttribute(
+                        SpidSamlAuthenticationPreprocessor.CLIENT_ATTRIBUTE_SPID_ISSUER);
+                    if (issuerOverride != null && !issuerOverride.isBlank()) {
+                        cvb.addAllowedAudience(URI.create(issuerOverride));
+                    }
                 }
             } catch (IllegalArgumentException ex) {
                 // warning has been already emitted
